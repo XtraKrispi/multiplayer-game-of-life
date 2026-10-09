@@ -84,7 +84,7 @@ createAutoThread gridStorage broadcastChannel =
       atomically do
         modifyTVar gridStorage step
         writeTChan broadcastChannel UpdateGrid
-      threadDelay 2000000
+      threadDelay 1000000
 
 data SelectSignals = SelectSignals
   { selectedPattern :: Text
