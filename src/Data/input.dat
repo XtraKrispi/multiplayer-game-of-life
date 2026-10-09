@@ -1,0 +1,70 @@
+section: Still Life
+name: Block
+pattern:
+____
+_.._
+_.._
+____
+
+name: Beehive
+pattern:
+______
+__..__
+_.__._
+__..__
+______
+
+name: Loaf
+pattern:
+______
+__..__
+_.__._
+__._._
+___.__
+______
+
+name: Boat
+pattern:
+_____
+_..__
+_._._
+__.__
+_____
+
+name: Tub
+pattern:
+_____
+__.__
+_._._
+__.__
+_____
+
+
+section: Oscillators
+name: Blinker (Period 2)
+pattern:
+_____
+__.__
+__.__
+__.__
+_____
+
+name: Toad (Period 2)
+pattern:
+______
+___.__
+_.__._
+_.__._
+__.___
+______
+
+name: Beacon (Period 2)
+pattern:
+______
+_..___
+_..___
+___.._
+___.._
+______
+
+
