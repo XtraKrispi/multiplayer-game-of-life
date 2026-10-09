@@ -13,7 +13,7 @@ import Data.Text.Lazy qualified as LT
 import GHC.Generics (Generic)
 import GameOfLife (Col (..), Coord (..), Grid, Row (..), add, mkGrid, step, translate)
 import Html.Grid (renderGrid)
-import Html.Home (autoButton)
+import Html.Home (autoButton, delay)
 import Html.Home qualified as Home
 import Html.Layout (layout)
 import Hypermedia.Datastar (patchElements, readSignals, sendPatchElements, sseResponse, stderrLogger)
@@ -41,7 +41,11 @@ data Handles = Handles
   , autoThread :: TVar (Maybe ThreadId)
   , autoChannel :: TChan ()
   , broadcastChannel :: TChan FeedMessage
+  , delayStorage :: TVar Int
   }
+
+defaultDelay :: Int
+defaultDelay = 1000000
 
 runApp :: IO ()
 runApp = do
@@ -53,10 +57,11 @@ runApp = do
       <*> newTVarIO Nothing
       <*> newTChanIO
       <*> newBroadcastTChanIO
+      <*> newTVarIO defaultDelay
   waiApp <- scottyAppT defaultOptions id (app patterns handles)
 
   -- Start automated by default
-  initialThread <- createAutoThread handles.gridStorage handles.broadcastChannel
+  initialThread <- createAutoThread handles
   atomically $ writeTVar handles.autoThread (Just initialThread)
   _ <- forkIO $ autoLoop handles
 
@@ -72,19 +77,19 @@ autoLoop handles = do
         killThread threadId
         atomically $ writeTVar handles.autoThread Nothing
       Nothing -> do
-        newThread <- createAutoThread handles.gridStorage handles.broadcastChannel
+        newThread <- createAutoThread handles
         atomically $ writeTVar handles.autoThread (Just newThread)
     -- Tell the feed that we need to update our button
     atomically $ writeTChan handles.broadcastChannel UpdateAuto
 
-createAutoThread :: TVar Grid -> TChan FeedMessage -> IO ThreadId
-createAutoThread gridStorage broadcastChannel =
+createAutoThread :: Handles -> IO ThreadId
+createAutoThread handles =
   forkIO do
     forever do
       atomically do
-        modifyTVar gridStorage step
-        writeTChan broadcastChannel UpdateGrid
-      threadDelay 1000000
+        modifyTVar handles.gridStorage step
+        writeTChan handles.broadcastChannel UpdateGrid
+      readTVarIO handles.delayStorage >>= threadDelay
 
 data SelectSignals = SelectSignals
   { selectedPattern :: Text
@@ -93,23 +98,40 @@ data SelectSignals = SelectSignals
   deriving (Generic, Show)
   deriving anyclass (FromJSON)
 
-data FeedMessage = UpdateGrid | UpdateAuto
+data FeedMessage
+  = UpdateGrid
+  | UpdateAuto
+  | UpdateDelay
 
 app :: Patterns -> Handles -> ScottyT IO ()
 app patterns handles = do
   middleware $ staticPolicy (addBase "public")
   get "/" do
     g <- liftIO $ readTVarIO handles.gridStorage
+    d <- liftIO $ readTVarIO handles.delayStorage
     mThread <- liftIO $ readTVarIO handles.autoThread
-    html $ renderHtml $ layout $ Home.page (isJust mThread) patterns g
+    html $ renderHtml $ layout $ Home.page (isJust mThread) d patterns g
   post "/reset" do
     liftIO $ atomically do
+      writeTVar handles.delayStorage defaultDelay
       writeTVar handles.gridStorage $ mkGrid 50 50 $ Coord <$> [(10, 10), (10, 11), (10, 12)]
       writeTChan handles.broadcastChannel UpdateGrid
   post "/step" do
     liftIO $ atomically do
       modifyTVar handles.gridStorage step
       writeTChan handles.broadcastChannel UpdateGrid
+  post "/speed-up" do
+    liftIO $ atomically do
+      modifyTVar handles.delayStorage (\s -> max 100000 (s - 50000))
+      writeTChan handles.broadcastChannel UpdateDelay
+  post "/slow-down" do
+    liftIO $ atomically do
+      modifyTVar handles.delayStorage (\s -> min maxBound (s + 50000))
+      writeTChan handles.broadcastChannel UpdateDelay
+  post "/default-speed" do
+    liftIO $ atomically do
+      writeTVar handles.delayStorage defaultDelay
+      writeTChan handles.broadcastChannel UpdateDelay
   post "/place" do
     req <- request
     eSignals :: Either String SelectSignals <- liftIO $ readSignals req
@@ -139,3 +161,6 @@ app patterns handles = do
             UpdateAuto -> do
               mThread <- readTVarIO handles.autoThread
               sendPatchElements gen (patchElements $ LT.toStrict $ renderHtml $ autoButton (isJust mThread))
+            UpdateDelay -> do
+              d <- readTVarIO handles.delayStorage
+              sendPatchElements gen (patchElements $ LT.toStrict $ renderHtml $ delay d)
